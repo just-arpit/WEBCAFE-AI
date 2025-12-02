@@ -1,10 +1,14 @@
-const functions = require('firebase-functions');
+const {onCall} = require('firebase-functions/v2/https');
+const {setGlobalOptions} = require('firebase-functions/v2');
 const admin = require('firebase-admin');
 admin.initializeApp();
 
 const fetch = global.fetch || require('node-fetch'); // Node 18+ has fetch
 
-const OPENAI_KEY = functions.config().openai?.key || process.env.OPENAI_API_KEY;
+// Set global options for all v2 functions
+setGlobalOptions({maxInstances: 10, region: 'us-central1'});
+
+const OPENAI_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 
 // Constants for security and performance
@@ -69,18 +73,18 @@ const streamOpenAI = async (messages, onChunk) => {
   }
 };
 
-exports.generateResponse = functions.https.onCall(async (data, context) => {
+exports.generateResponse = onCall(async (request) => {
   // Security: ensure user is authenticated
-  if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'User must be signed in');
+  if (!request.auth) {
+    throw new Error('User must be signed in');
   }
 
-  const {conversationId, assistantId} = data;
+  const {conversationId, assistantId} = request.data;
   if (!conversationId || !assistantId) {
-    throw new functions.https.HttpsError('invalid-argument', 'Missing conversationId or assistantId');
+    throw new Error('Missing conversationId or assistantId');
   }
 
-  const userId = context.auth.uid;
+  const userId = request.auth.uid;
   const db = admin.firestore();
   const conversationRef = db.collection('conversations').doc(conversationId);
   const messagesCol = conversationRef.collection('messages');
@@ -89,10 +93,10 @@ exports.generateResponse = functions.https.onCall(async (data, context) => {
     // Security: verify user owns this conversation
     const convDoc = await conversationRef.get();
     if (!convDoc.exists) {
-      throw new functions.https.HttpsError('not-found', 'Conversation not found');
+      throw new Error('Conversation not found');
     }
     if (convDoc.data().ownerUid !== userId) {
-      throw new functions.https.HttpsError('permission-denied', 'Not authorized to access this conversation');
+      throw new Error('Not authorized to access this conversation');
     }
 
     // Read recent messages for context (limit to prevent token overflow)
@@ -179,9 +183,6 @@ exports.generateResponse = functions.https.onCall(async (data, context) => {
     }
 
     // Return appropriate error
-    if (err instanceof functions.https.HttpsError) {
-      throw err;
-    }
-    throw new functions.https.HttpsError('internal', 'Failed to generate response');
+    throw new Error('Failed to generate response: ' + (err.message || 'Unknown error'));
   }
 });
