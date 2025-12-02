@@ -16,7 +16,14 @@ export default function SignIn() {
       await signInWithPopup(auth, provider);
     } catch (err) {
       console.error('Google sign-in error:', err);
-      setError(err.message || 'Failed to sign in with Google');
+      // If popup is blocked, show a helpful message
+      if (err.code === 'auth/popup-blocked') {
+        setError('Popup was blocked. Please allow popups for this site or use Email/Password sign-in below.');
+      } else if (err.code === 'auth/cancelled-popup-request') {
+        setError('Sign-in cancelled. Please try again.');
+      } else {
+        setError(err.message || 'Failed to sign in with Google');
+      }
     } finally {
       setLoading(false);
     }
